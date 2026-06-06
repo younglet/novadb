@@ -15,14 +15,41 @@ const EMPTY = `{
 }`
 const code = ref(EMPTY)
 const isPrivate = ref(true)
+
+async function togglePrivate() {
+  isPrivate.value = !isPrivate.value
+  if (!token.value) return
+  try {
+    const p = JSON.parse(code.value)
+    await api.updateObject(dataId.value, token.value, label.value, p, isPrivate.value)
+    showToast(isPrivate.value ? '已设为私有' : '已设为公开', 'success')
+  } catch (e) { showToast(e.message, 'error'); isPrivate.value = !isPrivate.value }
+}
 const updatetime = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const msg = ref(null)
 const jsonError = ref('')
 
+// Toast notification
+const toast = ref(null)
+let toastTimer = null
+function showToast(text, type) {
+  clearTimeout(toastTimer)
+  toast.value = { text, type }
+  toastTimer = setTimeout(() => { toast.value = null }, 2500)
+}
+
+// Order-only modal
+const showOrderModal = ref(false)
+const orderBefore = ref('')
+const orderAfter = ref('')
+
+// Track stored data for comparison
+const storedData = ref(null)
+
 const MAX_SIZE = 256 * 1024
-const codeTab = ref('python')
+const codeTab = ref('novadb')
 const copiedBlock = ref('')
 
 const apiBase = computed(() => window.location.origin + '/novadb/api')
@@ -32,6 +59,7 @@ const activeTab = ref('editor')
 const history = ref([])
 const historyLoading = ref(false)
 const restoring = ref(false)
+const showDeleteConfirm = ref(false)
 
 // Tooltip
 const tipEntry = ref(null)
@@ -52,12 +80,12 @@ const showConfirm = ref(false)
 // ── Code example blocks ──
 const readBlockPy = computed(() => isPrivate.value ?
   `import requests\n\nBASE = "${apiBase.value}"\nDATA_ID = "${dataId.value}"\nTOKEN = "${token.value || 'YOUR_TOKEN'}"\n\n# 该项目为私有，读取必须携带 token\nresp = requests.get(f"{BASE}/db/{DATA_ID}?token={TOKEN}")\ndata = resp.json()["data"]\nprint(data)` :
-  `import requests\n\nBASE = "${apiBase.value}"\nDATA_ID = "${dataId.value}"\n\n# 该项目为公开，无需 token 即可读取\n# 但修改数据仍然需要 token\nresp = requests.get(f"{BASE}/db/{DATA_ID}")\ndata = resp.json()["data"]\nprint(data)`
+  `import requests\n\nBASE = "${apiBase.value}"\nDATA_ID = "${dataId.value}"\n\n# 该项目为公开，无需 token 即可读取\nresp = requests.get(f"{BASE}/db/{DATA_ID}")\ndata = resp.json()["data"]\nprint(data)`
 )
 
 const readBlockJs = computed(() => isPrivate.value ?
   `const BASE = "${apiBase.value}";\nconst DATA_ID = "${dataId.value}";\nconst TOKEN = "${token.value || 'YOUR_TOKEN'}";\n\n// 该项目为私有，读取必须携带 token\nconst resp = await fetch(\`\${BASE}/db/\${DATA_ID}?token=\${TOKEN}\`);\nconst json = await resp.json();\nconsole.log(json.data);` :
-  `const BASE = "${apiBase.value}";\nconst DATA_ID = "${dataId.value}";\n\n// 该项目为公开，无需 token 即可读取\n// 但修改数据仍然需要 token\nconst resp = await fetch(\`\${BASE}/db/\${DATA_ID}\`);\nconst json = await resp.json();\nconsole.log(json.data);`
+  `const BASE = "${apiBase.value}";\nconst DATA_ID = "${dataId.value}";\n\n// 该项目为公开，无需 token 即可读取\nconst resp = await fetch(\`\${BASE}/db/\${DATA_ID}\`);\nconst json = await resp.json();\nconsole.log(json.data);`
 )
 
 const updateBlockPy = computed(() =>
@@ -79,7 +107,7 @@ const deleteBlockJs = computed(() =>
 // ── novadb SDK blocks ──
 const sdkReadBlock = computed(() => isPrivate.value ?
   `from novadb import NovaDB\n\n# 该项目为私有，必须传入 token 才能读取\ndb = NovaDB("${dataId.value}", "${token.value || 'YOUR_TOKEN'}")\ndata = db.get()\nprint(data)` :
-  `from novadb import NovaDB\n\n# 该项目为公开，无需 token 即可读取\n# 但修改数据仍然需要 token\ndb = NovaDB("${dataId.value}")\ndata = db.get()\nprint(data)`
+  `from novadb import NovaDB\n\n# 该项目为公开，无需 token 即可读取\ndb = NovaDB("${dataId.value}")\ndata = db.get()\nprint(data)`
 )
 
 const sdkUpdateBlock = computed(() =>
@@ -116,6 +144,12 @@ const barStyle = computed(() => {
 })
 
 const shareUrl = computed(() => `${window.location.origin}/novadb/api/db/${dataId.value}`)
+const copiedShare = ref(false)
+function copyShare() {
+  navigator.clipboard.writeText(shareUrl.value)
+  copiedShare.value = true
+  setTimeout(() => { copiedShare.value = false }, 2000)
+}
 
 onMounted(loadData)
 
@@ -156,6 +190,7 @@ async function loadData() {
     label.value = data.label || ''
     const raw1 = JSON.stringify(data.data, null, 2)
     code.value = raw1 === '{}' ? EMPTY : raw1
+    storedData.value = code.value
     isPrivate.value = data.private
     updatetime.value = data.updatetime
     validate()
@@ -164,17 +199,49 @@ async function loadData() {
 }
 
 async function saveData() {
+  // Auto-format first
+  try {
+    const p = JSON.parse(code.value)
+    code.value = JSON.stringify(p, null, 2)
+    jsonError.value = ''
+  } catch (_) {}
   validate()
   if (jsonError.value || oversize.value) return
-  if (!token.value) { msg.value = { type: 'error', text: '缺少 token' }; return }
+  if (!token.value) { showToast('缺少 token', 'error'); return }
   saving.value = true; msg.value = null
   try {
     const p = JSON.parse(code.value)
     const data = await api.updateObject(dataId.value, token.value, label.value, p, isPrivate.value)
     updatetime.value = data.updatetime
-    msg.value = { type: 'success', text: '✅ 保存成功' }
-  } catch (e) { msg.value = { type: 'error', text: e.message } }
+    storedData.value = code.value
+    if (data.order_only) {
+      orderBefore.value = JSON.stringify(data.data, null, 2) === '{}' ? '{\n  \n}' : JSON.stringify(data.data, null, 2)
+      orderAfter.value = code.value
+      showOrderModal.value = true
+    } else if (data.changed) {
+      showToast('保存成功', 'success')
+    } else {
+      showToast('无变化', 'info')
+    }
+  } catch (e) { showToast(e.message, 'error') }
   finally { saving.value = false }
+}
+
+async function forceSave() {
+  showOrderModal.value = false
+  saving.value = true
+  try {
+    const p = JSON.parse(code.value)
+    const data = await api.updateObject(dataId.value, token.value, label.value, p, isPrivate.value, true)
+    updatetime.value = data.updatetime
+    storedData.value = code.value
+    showToast('保存成功', 'success')
+  } catch (e) { showToast(e.message, 'error') }
+  finally { saving.value = false }
+}
+
+function cancelOrderModal() {
+  showOrderModal.value = false
 }
 
 // ── History ──
@@ -190,17 +257,25 @@ async function loadHistory() {
 
 function switchTab(tab) {
   activeTab.value = tab
+  msg.value = null
   if (tab === 'history') loadHistory()
 }
 
-function showTip(entry, event) {
+function formatHistoryData(raw) {
   try {
-    const lines = JSON.stringify(JSON.parse(entry.data), null, 2).split('\n')
-    const preview = lines.slice(0, 10)
-    tipData.value = preview.join('\n') + (lines.length > 10 ? '\n…' : '')
+    const parsed = JSON.parse(raw)
+    const formatted = JSON.stringify(parsed, null, 2)
+    return formatted === '{}' ? '{\n  \n}' : formatted
   } catch {
-    tipData.value = entry.data.slice(0, 400) + (entry.data.length > 400 ? '…' : '')
+    return raw
   }
+}
+
+function showTip(entry, event) {
+  const formatted = formatHistoryData(entry.data)
+  const lines = formatted.split('\n')
+  const preview = lines.slice(0, 10)
+  tipData.value = preview.join('\n') + (lines.length > 10 ? '\n…' : '')
   tipEntry.value = entry.id
   moveTip(event)
 }
@@ -224,11 +299,12 @@ function hideTip() {
 }
 
 function openDetail(entry) {
+  detailData.value = formatHistoryData(entry.data)
   try {
-    detailData.value = JSON.stringify(JSON.parse(entry.data), null, 2)
-    currentData.value = JSON.stringify(JSON.parse(code.value), null, 2)
+    const parsed = JSON.parse(code.value)
+    const formatted = JSON.stringify(parsed, null, 2)
+    currentData.value = formatted === '{}' ? '{\n  \n}' : formatted
   } catch {
-    detailData.value = entry.data
     currentData.value = code.value
   }
   detailEntry.value = entry
@@ -306,12 +382,13 @@ async function doRestore() {
     const data = await api.restoreVersion(dataId.value, token.value, entry.id)
     const raw2 = JSON.stringify(data.data, null, 2)
     code.value = raw2 === '{}' ? EMPTY : raw2
+    storedData.value = code.value
     label.value = data.label || ''
     isPrivate.value = data.private
     updatetime.value = data.updatetime
     validate()
     activeTab.value = 'editor'
-    msg.value = { type: 'success', text: '✅ 已恢复到指定版本' }
+    showToast('恢复成功', 'success')
   } catch (e) { msg.value = { type: 'error', text: e.message } }
   finally { restoring.value = false; confirmEntry.value = null }
 }
@@ -322,6 +399,20 @@ function cancelRestore() {
 }
 
 function fmtSize(bytes) { return (bytes / 1024).toFixed(1) + ' KB' }
+
+function promptDelete() {
+  showDeleteConfirm.value = true
+}
+async function confirmDelete() {
+  showDeleteConfirm.value = false
+  try {
+    await api.deleteObject(dataId.value, token.value)
+    router.push('/data')
+  } catch (e) { showToast(e.message, 'error') }
+}
+function cancelDeleteConfirm() {
+  showDeleteConfirm.value = false
+}
 </script>
 
 <template>
@@ -346,44 +437,97 @@ function fmtSize(bytes) { return (bytes / 1024).toFixed(1) + ' KB' }
       <div v-else class="card">
         <div class="field">
           <label>标签</label>
-          <input type="text" v-model="label" placeholder="可选标签" />
+          <input type="text" v-model="label" placeholder="输入标签" />
         </div>
-        <div class="editor-meta">
-          <span v-if="updatetime" style="font-size:.78rem;color:var(--muted);">🕐 {{ updatetime }}</span>
-          <span v-else style="font-size:.78rem;color:var(--muted);">🆕</span>
+
+        <div class="editor-wrap">
+          <textarea v-model="code" :class="editorClass" spellcheck="false" @input="validate" placeholder='{"key": "value"}'></textarea>
+        </div>
+        <div v-if="jsonError" class="error-text">❌ {{ jsonError }}</div>
+
+        <!-- Size bar below editor -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+          <span v-if="updatetime" style="font-size:.75rem;color:var(--muted);">🕐 {{ updatetime }}</span>
+          <span v-else></span>
           <div class="size-bar">
             <span>{{ sizeKB }} / 256 KB</span>
             <div class="track"><div class="fill" :style="barStyle"></div></div>
           </div>
         </div>
-        <div class="editor-wrap">
-          <textarea v-model="code" :class="editorClass" spellcheck="false" @input="validate" placeholder='{"key": "value"}'></textarea>
-        </div>
-        <div v-if="jsonError" class="error-text">❌ {{ jsonError }}</div>
-        <div class="actions" style="margin-top:8px;">
-          <button @click="prettyPrint">🧹 格式化</button>
-          <button @click="clearData">🗑 清空</button>
-        </div>
-        <div class="toggle-row">
-          <span>{{ isPrivate ? '🔒 私有' : '🌐 公开' }}</span>
-          <label class="switch">
-            <input type="checkbox" :checked="!isPrivate" @change="isPrivate = !isPrivate" />
-            <span class="slider"></span>
-          </label>
-        </div>
-        <div v-if="!isPrivate" style="margin-bottom:12px;">
-          <span style="font-size:.78rem;color:var(--muted);">分享链接</span>
-          <div class="share-link" style="margin-top:4px;">{{ shareUrl }}</div>
-        </div>
-        <div class="actions">
+
+        <!-- Actions: tools left, save right -->
+        <div class="actions" style="margin-top:6px;justify-content:space-between;">
+          <div style="display:flex;gap:10px;">
+            <button @click="prettyPrint">🧹 格式化</button>
+            <button @click="clearData">🗑 清空</button>
+            <button @click="loadData" :disabled="loading">↺ 恢复</button>
+            <button class="btn-danger btn-sm" @click="promptDelete">🗑 删除</button>
+          </div>
           <button class="btn-primary" @click="saveData" :disabled="saving || !!jsonError || oversize || !token">
             💾 {{ saving ? '保存中…' : '保存' }}
           </button>
-          <button @click="loadData" :disabled="loading">🔄 重载</button>
         </div>
+
+        <div class="toggle-row">
+          <span>{{ isPrivate ? '🔒 私有' : '🌐 公开' }}</span>
+          <label class="switch">
+            <input type="checkbox" :checked="!isPrivate" @change="togglePrivate" />
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div v-if="!isPrivate" style="margin-bottom:12px;">
+          <span style="font-size:.78rem;color:var(--muted);">分享链接</span>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+            <div class="share-link" style="flex:1;">{{ shareUrl }}</div>
+            <button class="btn-sm" @click="copyShare" style="flex-shrink:0;">{{ copiedShare ? '✅' : '📋' }}</button>
+          </div>
+        </div>
+
         <div v-if="oversize" class="msg error" style="margin-top:12px;">⚠️ 数据过大（{{ sizeKB }}），上限 256 KB</div>
-        <div v-if="msg" :class="['msg', msg.type]" style="margin-top:12px;">{{ msg.text }}</div>
       </div>
+
+      <!-- Toast -->
+      <Teleport to="body">
+        <div v-if="toast" :class="['toast', 'toast-' + toast.type]">{{ toast.text }}</div>
+      </Teleport>
+
+      <!-- Delete confirm modal -->
+      <Teleport to="body">
+        <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="cancelDeleteConfirm">
+          <div class="modal">
+            <h3>⚠️ 确认删除</h3>
+            <p style="color:var(--muted);font-size:.88rem;line-height:1.6;">确定要删除「{{ label || dataId }}」吗？此操作不可恢复。</p>
+            <div class="actions" style="margin-top:14px;">
+              <button class="btn-ghost" @click="cancelDeleteConfirm">取消</button>
+              <button class="btn-danger" @click="confirmDelete">确认删除</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
+
+      <!-- Order-only modal -->
+      <Teleport to="body">
+        <div v-if="showOrderModal" class="modal-overlay" @click.self="cancelOrderModal">
+          <div class="modal" style="max-width:700px;">
+            <h3>⚠️ 仅发现字段顺序变化，是否存储？</h3>
+            <div style="display:flex;gap:12px;margin-top:14px;">
+              <div style="flex:1;">
+                <div style="font-size:.74rem;color:var(--muted);margin-bottom:4px;">当前存储</div>
+                <pre style="margin:0;max-height:260px;overflow:auto;font-size:.72rem;"><code>{{ orderBefore }}</code></pre>
+              </div>
+              <div style="flex:1;">
+                <div style="font-size:.74rem;color:var(--accent);margin-bottom:4px;">新顺序</div>
+                <pre style="margin:0;max-height:260px;overflow:auto;font-size:.72rem;"><code>{{ orderAfter }}</code></pre>
+              </div>
+            </div>
+            <div class="actions" style="margin-top:14px;">
+              <button class="btn-ghost" @click="cancelOrderModal">取消</button>
+              <button class="btn-primary" @click="forceSave" :disabled="saving">存储新顺序</button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
     </template>
 
     <!-- ── History tab ── -->
@@ -516,14 +660,17 @@ function fmtSize(bytes) { return (bytes / 1024).toFixed(1) + ' KB' }
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
           <h2 style="margin-bottom:0;">📋 调用示例</h2>
           <div class="code-tabs" style="margin-bottom:0;">
+            <button :class="{ active: codeTab === 'novadb' }" @click="codeTab = 'novadb'">novadb 模块</button>
             <button :class="{ active: codeTab === 'python' }" @click="codeTab = 'python'">Python</button>
             <button :class="{ active: codeTab === 'js' }" @click="codeTab = 'js'">JavaScript</button>
-            <button :class="{ active: codeTab === 'novadb' }" @click="codeTab = 'novadb'">novadb 模块</button>
           </div>
         </div>
 
-        <!-- SDK tab: different layout (create + read + update + delete with data_id/token already filled) -->
+        <!-- SDK tab -->
         <template v-if="codeTab === 'novadb'">
+          <div style="background:rgba(14,165,233,0.06);border:1px solid rgba(14,165,233,0.2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:.8rem;color:var(--muted);">
+            📥 <a href="/novadb/novadb.py" style="color:var(--accent);text-decoration:underline;">下载 novadb.py</a> 放到你的项目目录即可使用。
+          </div>
           <div class="code-section">
             <div class="code-section-header">
               <span>📖 读取数据</span>

@@ -9,6 +9,7 @@
 - ✅ **公开 / 私有切换** — 一键设为公开，生成链接发给同学直接看
 - ✅ **256KB 存储** — 足够存游戏存档、配置、待办，覆盖 95% 教学场景
 - ✅ **50 条历史记录** — 每次变更自动存档，支持 Git 风格 diff 对比，一键恢复
+- ✅ **智能保存** — 自动去重，顺序变化提示确认，无变化不产生历史
 - ✅ **Python SDK** — `from novadb import NovaDB`，三行代码读写数据
 - ✅ **在线编辑器** — 语法高亮、实时校验、代码示例即时生成
 
@@ -61,7 +62,7 @@ npm run dev
 |------|------|------|
 | `POST` | `/db` | 创建数据 → 返回 `data_id` + `token` |
 | `GET` | `/db/{data_id}` | 读取数据（公开免鉴权，私有需 `?token=xxx`） |
-| `PUT` | `/db/{data_id}` | 更新数据（需 `{token, data}`） |
+| `PUT` | `/db/{data_id}` | 更新数据（需 `{token, data}`，支持 `force` 参数强制保存顺序变化） |
 | `DELETE` | `/db/{data_id}` | 删除数据（需 `{token}`） |
 | `GET` | `/db?user_id=xxx` | 列出用户的所有数据对象 |
 | `GET` | `/db/{data_id}/history?token=xxx` | 获取历史版本列表 |
@@ -132,7 +133,7 @@ SDK 仅 `get()` / `set()` / `delete()` 三个方法，零学习成本。
 ```
 novadb/
 ├── backend/
-│   ├── main.py              # FastAPI 应用，7 个路由 + 限流
+│   ├── main.py              # FastAPI 应用，10 个路由 + 限流
 │   ├── database.py           # SQLite 数据层（user_objects + object_history）
 │   ├── requirements.txt      # fastapi + uvicorn
 │   └── Dockerfile            # 多阶段构建（Node → Python）

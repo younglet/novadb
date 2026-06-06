@@ -73,6 +73,7 @@ class UpdateRequest(BaseModel):
     label: str = ""
     private: bool = True
     data: dict
+    force: bool = False  # 强制保存（即使仅字段顺序变化）
 
     @field_validator("data")
     @classmethod
@@ -91,8 +92,12 @@ def _require_user(request: Request) -> str:
         raise HTTPException(401, "请先登录")
     return uid
 
+def _normalize(data: dict) -> str:
+    """标准化 JSON：排序键 + 紧凑格式，保证相同内容产生相同字符串。"""
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
 def _check_size(data: dict) -> int:
-    raw = json.dumps(data, ensure_ascii=False)
+    raw = _normalize(data)
     sz = len(raw.encode("utf-8"))
     if sz > MAX_DATA_SIZE:
         raise HTTPException(413, f"数据过大：{sz} bytes（上限 {MAX_DATA_SIZE} bytes）")
@@ -163,11 +168,17 @@ def update_object(data_id: str, body: UpdateRequest):
         raise HTTPException(429, f"写入频率过高")
     _check_size(body.data)
     data_json = json.dumps(body.data, ensure_ascii=False)
-    ok = update(data_id.strip(), body.token.strip(), body.label.strip(), body.private, data_json)
+    ok, changed, order_only = update(
+        data_id.strip(), body.token.strip(), body.label.strip(), body.private, data_json,
+        force=body.force
+    )
     if not ok:
         raise HTTPException(404, "data_id 不存在或 token 不匹配")
     row = get_by_id(data_id.strip())
-    return _fmt(row)
+    result = _fmt(row)
+    result["changed"] = changed
+    result["order_only"] = order_only
+    return result
 
 
 @app.delete("/novadb/api/db/{data_id}")
@@ -204,6 +215,15 @@ def restore_object(data_id: str, body: RestoreRequest):
         raise HTTPException(404, "恢复失败：data_id、token 或历史版本不存在")
     row = get_by_id(data_id.strip())
     return _fmt(row)
+
+
+# ── SDK download ──
+@app.get("/novadb/novadb.py")
+def download_sdk():
+    sdk = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "novadb.py")
+    if os.path.isfile(sdk):
+        return FileResponse(sdk, media_type="application/octet-stream", filename="novadb.py")
+    raise HTTPException(404)
 
 
 # ── Frontend SPA ──

@@ -36,21 +36,12 @@ async function doCreate() {
     showCreate.value = false
     newLabel.value = ''
     newCredential.value = { data_id: result.data_id, token: result.token }
+    setTimeout(() => { newCredential.value = null }, 3000)
     await loadAll()
   } catch (e) {
     error.value = e.message
   } finally {
     creating.value = false
-  }
-}
-
-async function doDelete(obj) {
-  if (!confirm(`确定删除「${obj.label || obj.data_id}」？`)) return
-  try {
-    await api.deleteObject(obj.data_id, obj.token)
-    await loadAll()
-  } catch (e) {
-    error.value = e.message
   }
 }
 
@@ -60,12 +51,6 @@ function copy(val) {
   setTimeout(() => { copied.value = '' }, 2000)
 }
 
-function copyShareUrl(dataId) {
-  const url = `${window.location.origin}/novadb/api/db/${dataId}`
-  navigator.clipboard.writeText(url)
-  copied.value = 'share_' + dataId
-  setTimeout(() => { copied.value = '' }, 2000)
-}
 
 function goEditor(dataId, token) {
   router.push({ path: `/editor/${dataId}`, query: { token } })
@@ -87,19 +72,13 @@ function dismissCredential() {
       <button class="btn-primary" @click="showCreate = true">＋ 新建</button>
     </div>
 
-    <!-- New credential banner -->
-    <div v-if="newCredential" class="msg success" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-      <div>
-        ✅ 创建成功，请保存凭证<br/>
-        <code style="color:var(--accent);">id: {{ newCredential.data_id }}</code>
-        &nbsp;&nbsp;
-        <code style="color:var(--orange);">token: {{ newCredential.token }}</code>
+    <!-- New credential toast (teleported, no layout shift) -->
+    <Teleport to="body">
+      <div v-if="newCredential" class="toast toast-success" style="pointer-events:auto;">
+        <span>✅ 创建成功，快去使用吧！</span>
+        <button class="btn-sm btn-ghost" @click="dismissCredential" style="margin-left:12px;">✕</button>
       </div>
-      <div style="display:flex;gap:6px;">
-        <button class="btn-sm" @click="copy(newCredential.token)">{{ copied === newCredential.token ? '✅' : '📋 复制 token' }}</button>
-        <button class="btn-sm btn-ghost" @click="dismissCredential">✕</button>
-      </div>
-    </div>
+    </Teleport>
 
     <div v-if="error" class="msg error">{{ error }}</div>
     <div v-if="loading" style="text-align:center;padding:60px;color:var(--muted);">加载中…</div>
@@ -110,39 +89,29 @@ function dismissCredential() {
     </div>
 
     <div v-else class="token-grid">
-      <div v-for="obj in objects" :key="obj.data_id" class="token-card">
+      <div v-for="obj in objects" :key="obj.data_id" class="token-card" @click="goEditor(obj.data_id, obj.token)">
         <div class="token-label">{{ obj.label || '未命名' }}</div>
 
         <div class="token-code-row">
           <span class="key-label">id</span>
-          <code style="color:var(--accent);">{{ obj.data_id }}</code>
-          <button class="btn-sm copy-btn" @click="copy(obj.data_id)">
+          <code style="color:#0ea5e9;">{{ obj.data_id }}</code>
+          <button class="btn-sm copy-btn" @click.stop="copy(obj.data_id)">
             {{ copied === obj.data_id ? '✅' : '📋' }}
           </button>
         </div>
 
         <div class="token-code-row">
           <span class="key-label">token</span>
-          <code style="color:var(--orange);">{{ obj.token }}</code>
-          <button class="btn-sm copy-btn" @click="copy(obj.token)">
+          <code style="color:#f59e0b;">{{ obj.token }}</code>
+          <button class="btn-sm copy-btn" @click.stop="copy(obj.token)">
             {{ copied === obj.token ? '✅' : '📋' }}
           </button>
         </div>
 
-        <div class="token-meta" style="margin-top:6px;">
-          <span>{{ obj.private ? '🔒 私有' : '🌐 公开' }}</span>
+        <div class="token-meta" style="margin-top:10px;">
+          <span>{{ obj.private ? '🔒 私密' : '🌐 公开' }}</span>
           <span>📦 {{ sizeKB(obj.size_bytes) }}</span>
-          <span v-if="!obj.private" style="cursor:pointer;color:var(--accent);" @click="copyShareUrl(obj.data_id)">
-            {{ copied === 'share_' + obj.data_id ? '✅ 已复制' : '🔗 复制分享链接' }}
-          </span>
-        </div>
-        <div class="token-meta">
           <span>🕐 {{ obj.updatetime || '-' }}</span>
-        </div>
-
-        <div class="token-actions">
-          <button @click="goEditor(obj.data_id, obj.token)">✏️ 编辑</button>
-          <button class="btn-danger btn-sm" @click="doDelete(obj)">🗑 删除</button>
         </div>
       </div>
     </div>

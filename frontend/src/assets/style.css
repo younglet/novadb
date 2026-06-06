@@ -20,6 +20,7 @@ body {
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
+  user-select: none;
   background-image:
     radial-gradient(ellipse at 50% 0%, rgba(0,212,170,0.04) 0%, transparent 60%),
     radial-gradient(ellipse at 80% 20%, rgba(14,165,233,0.03) 0%, transparent 50%);
@@ -142,7 +143,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
   border-color: rgba(0,212,170,0.35);
   box-shadow: 0 0 24px rgba(0,212,170,0.06);
 }
-.token-card .token-label { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; }
+.token-card .token-label { font-size: 0.95rem; font-weight: 700; margin-bottom: 14px; color: var(--accent); }
 .token-code-row {
   display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
 }
@@ -160,7 +161,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
 .token-meta {
   font-size: 0.76rem; color: var(--muted);
-  display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 4px;
+  display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 0;
 }
 .token-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 
@@ -202,6 +203,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
   color: var(--text); font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 0.85rem; line-height: 1.7; resize: vertical; outline: none;
   tab-size: 2; transition: border-color .2s, box-shadow .2s;
+  user-select: text;
 }
 .editor-wrap textarea:focus { border-color: var(--accent); box-shadow: var(--glow); }
 .editor-wrap .valid { border-color: rgba(0,212,170,0.4); }
@@ -248,6 +250,21 @@ button:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 }
 .error-text { color: var(--red); font-size: 0.78rem; margin-top: 6px; }
 
+/* ── Toast ── */
+.toast {
+  position: fixed; top: 68px; left: 50%; transform: translateX(-50%);
+  z-index: 200; max-width: 1000px; width: calc(100% - 40px);
+  padding: 10px 20px; border-radius: 8px; font-size: 0.86rem;
+  backdrop-filter: blur(10px);
+  animation: toast-in .25s ease forwards;
+  text-align: center;
+  display: flex; align-items: center; justify-content: center;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+.toast-success { background: rgba(0,212,170,0.15); border: 1px solid rgba(0,212,170,0.4); color: var(--accent); }
+.toast-info    { background: rgba(14,165,233,0.12);  border: 1px solid rgba(14,165,233,0.3);  color: var(--accent2); }
+.toast-error   { background: rgba(244,63,94,0.12);   border: 1px solid rgba(244,63,94,0.3);   color: var(--red); }
+
 /* ── Empty state ── */
 .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
 .empty .icon { font-size: 3rem; margin-bottom: 12px; }
@@ -258,17 +275,13 @@ pre {
   padding: 16px 20px; overflow-x: auto; font-size: 0.78rem; line-height: 1.7;
   margin: 12px 0; position: relative;
 }
-pre code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }
+pre code { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; user-select: text; }
+.token-code-row code { user-select: text; }
 pre .lang-tag {
   position: absolute; top: 8px; right: 14px;
   font-size: 0.66rem; color: var(--muted); text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-pre .copy-code {
-  position: absolute; top: 6px; right: 50px;
-  font-size: 0.7rem; padding: 3px 8px;
-}
-
 /* ── Modal ── */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.7);

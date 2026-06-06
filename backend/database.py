@@ -3,6 +3,8 @@ NovaDB SQLite layer (v3) — one object = one id + one token pair.
 Single table: user_objects(data_id, user_id, token, label, private, data, updatetime)
 """
 
+import json
+import json
 import sqlite3
 import os
 import random
@@ -11,11 +13,22 @@ from datetime import datetime, timezone
 
 DB_PATH = os.environ.get("NOVADB_DB_PATH", "./novadb.db")
 
-DATA_ID_LEN = 14
-DATA_ID_CHARS = string.ascii_lowercase + string.digits
-TOKEN_PREFIX = "stu_"
-TOKEN_RAND_LEN = 8
-TOKEN_CHARS = string.ascii_lowercase + string.digits
+ADJECTIVES = [
+    "happy", "bright", "clever", "brave", "swift", "calm", "warm",
+    "cool", "kind", "lucky", "sunny", "noble", "eager", "fresh",
+    "bold", "wise", "merry", "sweet", "sharp", "jolly", "keen",
+    "grand", "super", "swell", "brisk", "cheer", "dandy", "elite",
+    "fancy", "glad", "handy", "ideal", "jaunty", "lively", "mellow",
+    "neat", "perky", "quick", "ready", "snappy", "tidy",
+]
+ANIMALS = [
+    "cat", "dog", "fox", "owl", "deer", "bear", "swan", "dove",
+    "seal", "panda", "koala", "fawn", "lamb", "duck", "bunny",
+    "wolf", "hawk", "otter", "whale", "finch", "crane", "robin",
+    "loris", "moose", "tapir", "civet", "gecko", "heron", "lemur",
+    "quail", "shrew", "trout", "coral", "fairy", "snail", "tiger",
+    "zebra", "llama", "sloth", "eagle",
+]
 
 
 def get_db() -> sqlite3.Connection:
@@ -26,10 +39,15 @@ def get_db() -> sqlite3.Connection:
 
 
 def _rand_data_id() -> str:
-    return "".join(random.choices(DATA_ID_CHARS, k=DATA_ID_LEN))
+    adj = random.choice(ADJECTIVES)
+    animal = random.choice(ANIMALS)
+    num = random.randint(1000, 9999)
+    return f"{adj}-{animal}-{num}"
+
 
 def _rand_token() -> str:
-    return TOKEN_PREFIX + "".join(random.choices(TOKEN_CHARS, k=TOKEN_RAND_LEN))
+    """8 hex chars."""
+    return "".join(random.choices("0123456789abcdef", k=8))
 
 
 def init_db() -> None:
@@ -120,32 +138,41 @@ def create(user_id: str, label: str, private: bool, data_json: str) -> tuple[str
         conn.close()
 
 
-def update(data_id: str, token: str, label: str, private: bool, data_json: str) -> bool:
+def update(data_id: str, token: str, label: str, private: bool, data_json: str, force: bool = False) -> tuple[bool, bool, bool]:
+    """Returns (found, changed, order_only). order_only=True means only key order differs."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db()
     try:
-        # Check if anything actually changed
         old = conn.execute(
             "SELECT label, private, data FROM user_objects WHERE data_id=? AND token=?",
             (data_id, token),
         ).fetchone()
         if not old:
-            return False
-        changed = (
-            old["label"] != label or
-            bool(old["private"]) != bool(private) or
-            old["data"] != data_json
-        )
-        cur = conn.execute(
-            """UPDATE user_objects SET label=?, private=?, data=?, updatetime=?
-               WHERE data_id=? AND token=?""",
-            (label, int(private), data_json, now, data_id, token),
-        )
+            return False, False, False
+        label_changed = old["label"] != label
+        private_changed = bool(old["private"]) != bool(private)
+        data_changed = old["data"] != data_json
+        order_only = False
+        if data_changed and not label_changed and not private_changed:
+            try:
+                old_norm = json.dumps(json.loads(old["data"]), sort_keys=True, separators=(',', ':'))
+                new_norm = json.dumps(json.loads(data_json), sort_keys=True, separators=(',', ':'))
+                if old_norm == new_norm:
+                    order_only = True
+                    if not force:
+                        return True, False, True
+            except Exception:
+                pass
+        changed = label_changed or private_changed or data_changed
         if changed:
-            # Record OLD state before overwriting
+            conn.execute(
+                """UPDATE user_objects SET label=?, private=?, data=?, updatetime=?
+                   WHERE data_id=? AND token=?""",
+                (label, int(private), data_json, now, data_id, token),
+            )
             _add_history(conn, data_id, old["label"], bool(old["private"]), old["data"])
         conn.commit()
-        return True
+        return True, changed, order_only
     finally:
         conn.close()
 
@@ -236,6 +263,6 @@ def restore_from_history(data_id: str, token: str, history_id: int) -> bool:
             (data_id, entry["label"], entry["private"], entry["data"], now),
         )
         conn.commit()
-        return True
+        return True, changed
     finally:
         conn.close()

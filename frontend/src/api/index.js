@@ -35,8 +35,8 @@ export const api = {
       return d
     }))
   },
-  updateObject(dataId, token, label, data, isPrivate) {
-    return request('PUT', `/db/${dataId}`, { token, label, private: isPrivate, data })
+  updateObject(dataId, token, label, data, isPrivate, force = false) {
+    return request('PUT', `/db/${dataId}`, { token, label, private: isPrivate, data, force })
   },
   deleteObject(dataId, token) {
     return request('DELETE', `/db/${dataId}`, { token })
