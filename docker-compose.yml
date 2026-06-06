@@ -1,0 +1,16 @@
+services:
+  novadb:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: novadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - novadb_data:/app/data
+    environment:
+      - NOVADB_DB_PATH=/app/data/novadb.db
+    restart: unless-stopped
+
+volumes:
+  novadb_data:
